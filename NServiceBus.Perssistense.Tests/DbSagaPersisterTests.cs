@@ -14,6 +14,7 @@ namespace NServiceBus.Persistense.Tests
     [TestFixture]
     public class DbSagaPersisterTests
     {
+        private DbUnitOfWork uow;
         private DbContextSessionFactory sessionFactory;
         private DbSagaPersister persister;
         private TestSagaData saga;
@@ -28,6 +29,7 @@ namespace NServiceBus.Persistense.Tests
         public void BeforeEachTest()
         {
             sessionFactory = new DbContextSessionFactory();
+            uow = new DbUnitOfWork(sessionFactory);
             persister = new DbSagaPersister(sessionFactory);
             saga = GetTestSaga();
         }
@@ -47,7 +49,9 @@ namespace NServiceBus.Persistense.Tests
         [Test]
         public void CanSaveSaga()
         {
+            uow.Begin();
             persister.Save(saga);
+            uow.End();
 
             using (var context = new SagaContext())
             {
@@ -65,8 +69,13 @@ namespace NServiceBus.Persistense.Tests
         [Test]
         public void CanUpdateSaga()
         {
+            uow.Begin();
             persister.Save(saga);
+            uow.End();
+
+            uow.Begin();
             persister.Update(saga);
+            uow.End();
 
             using (var context = new SagaContext())
             {
@@ -81,8 +90,14 @@ namespace NServiceBus.Persistense.Tests
         [Test]
         public void CanCompleteSaga()
         {
+            uow.Begin();
             persister.Save(saga);
+            uow.End();
+
+            uow.Begin();
             persister.Complete(saga);
+            uow.End();
+
             using (var context = new SagaContext())
             {
                 var sagaData = context.SagaData.FirstOrDefault(s => s.Id == saga.Id);
@@ -94,8 +109,13 @@ namespace NServiceBus.Persistense.Tests
         [Test]
         public void CanGetSagaById()
         {
+            uow.Begin();
             persister.Save(saga);
+            uow.End();
+
+            uow.Begin();
             var sagaFromDb = persister.Get<TestSagaData>(saga.Id);
+            uow.End();
 
             AssertSagaIsEqual(sagaFromDb);
         }
@@ -103,8 +123,13 @@ namespace NServiceBus.Persistense.Tests
         [Test]
         public void CanGetSagaByGeneralProperty()
         {
+            uow.Begin();
             persister.Save(saga);
+            uow.End();
+
+            uow.Begin();
             var sagaFromDb = persister.Get<TestSagaData>("StringProperty", saga.StringProperty);
+            uow.End();
 
             AssertSagaIsEqual(sagaFromDb);
         }
@@ -112,8 +137,13 @@ namespace NServiceBus.Persistense.Tests
         [Test]
         public void CanGetSagaByUniqueProperty()
         {
+            uow.Begin();
             persister.Save(saga);
+            uow.End();
+
+            uow.Begin();
             var sagaFromDb = persister.Get<TestSagaData>("CorrelationId", saga.CorrelationId);
+            uow.End();
 
             AssertSagaIsEqual(sagaFromDb);
         }
@@ -122,9 +152,15 @@ namespace NServiceBus.Persistense.Tests
         [ExpectedException(typeof(DbUpdateException))]
         public void SavingSagaWithSameUniquePropertyThrowsException()
         {
+            uow.Begin();
             persister.Save(saga);
+            uow.End();
+
             saga.Id = Guid.NewGuid();
+
+            uow.Begin();
             persister.Save(saga);
+            uow.End();
         }
 
         [Test]
@@ -132,16 +168,22 @@ namespace NServiceBus.Persistense.Tests
         public void SavingSagaInDifferentThreadsThrowsException()
         {
             //Worker Thread 1
+            uow.Begin();
             persister.Save(saga);
+            uow.End();
 
             //Worker Thread 2
+            uow.Begin();
             persister.Save(saga);
+            uow.End();
         }
 
         [Test]
         public void UpdateSagaInDifferentThreadsThrowsConcurrencyException()
         {
+            uow.Begin();
             persister.Save(saga);
+            uow.End();
 
             var cts = new CancellationTokenSource();
             var action = new Action(() =>
@@ -152,7 +194,9 @@ namespace NServiceBus.Persistense.Tests
                                                 {
                                                     if(cts.Token.IsCancellationRequested)
                                                         break;
+                                                    uow.Begin();
                                                     persister.Update(saga);
+                                                    uow.End();
                                                 }
                                                 catch (DbUpdateConcurrencyException exc)
                                                 {
@@ -167,7 +211,7 @@ namespace NServiceBus.Persistense.Tests
             task1.Start();
             task2.Start();
             var tasks = new Task[] {task1, task2};
-            var index = Task.WaitAny(tasks, 1000);
+            var index = Task.WaitAny(tasks, 10000);
 
             Assert.AreNotEqual(-1, index);
             Assert.AreEqual(true, cts.IsCancellationRequested);

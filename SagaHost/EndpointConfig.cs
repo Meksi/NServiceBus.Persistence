@@ -36,7 +36,7 @@ namespace SagaHost
                                         }
                                         
 	                                });
-           task.Start();
+           //task.Start();
 	    }
 
 	    public void Stop()
